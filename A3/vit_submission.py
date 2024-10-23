@@ -17,15 +17,15 @@ class Args:
 
     # Hyperparameters
     epochs = 25  # Should easily reach above 65% test acc after 20 epochs with an hidden_size of 64
-    batch_size = None
-    lr = None
-    weight_decay = None
+    batch_size = 64
+    lr = 0.0003
+    weight_decay = 0.00001
 
-    # TODO: Hyperparameters for ViT
+    # Hyperparameters for ViT
     # Adjust as you see fit
-    input_resolution = None
-    in_channels = None
-    patch_size = None
+    input_resolution = 32
+    in_channels = 3
+    patch_size = 4
     hidden_size = 64
     layers = 6
     heads = 8
