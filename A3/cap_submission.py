@@ -4,12 +4,9 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from nltk.translate.bleu_score import corpus_bleu
-from transformers import Seq2SeqTrainer
-from transformers import default_data_collator
-# ##########
-# TODO: Add more imports
+from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
+from transformers import default_data_collator, AutoProcessor, AutoTokenizer, VisionEncoderDecoderModel
 
-# ##########
 
 class Args:
     """Configuration.
@@ -22,7 +19,7 @@ class Args:
     root_dir = "./flickr8k"
 
     # Save your model as "cap-vlm-{YOUR_CCID}"
-    YOUR_CCID = ""
+    YOUR_CCID = "amaralpe"
     name = f"cap-vlm-{YOUR_CCID}"
 
     # Hyperparameters
@@ -50,42 +47,73 @@ class FlickrDataset(Dataset):
         ):
         assert mode in ["train", "val", "test"]
         self.args = args
-        # ####################
-        # TODO: Load Flickr8k dataset
-        # TODO: Initialize vision encoder's processor
-        # TODO: Initialize langauge decoder's tokenizer
+        
+        # Load the data into lines
+        with open(f"{args.root_dir}/{mode}.txt", "r") as f:
+            lines = f.readlines()
+
+        # Parse image paths and captions
+        self.img_paths = []
+        self.captions = []
+        for line in lines:
+            img_path, caption = line.strip().split(";")  # Assuming tab-separated file
+            self.img_paths.append(f"{args.root_dir}/images/{img_path}")
+            self.captions.append(caption)
+        
+        # Initialize vision encoder's processor
+        # Initialize langauge decoder's tokenizer
         self.processor = processor
         self.tokenizer = tokenizer
-
-        self.img_paths, self.captions = None, None
-        # ####################
 
     def __len__(self):
         return len(self.img_paths)
 
     def __getitem__(self, idx):
-        # ####################
-        # TODO: Load and process image-caption data
+        # Load and process image-caption data
+        # Load image and process it
+        image = Image.open(self.img_paths[idx]).convert("RGB")
+        pixel_values = self.processor(images=image, return_tensors="pt").pixel_values
+
+        # Tokenize the caption
+        # Add the padding token to the GPT-2 tokenizer
+        self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+        # labels = self.tokenizer(
+        #     self.captions[idx],
+        #     return_tensors="pt",
+        #     padding="max_length",
+        #     truncation=True,
+        #     max_length=self.args.max_length
+        # ).input_ids
+
+        labels = self.tokenizer(
+            f"<|beginoftext|> {self.captions} <|endoftext|>",
+            padding="max_length",
+            truncation=True,
+            max_length=self.args.max_length,
+            return_tensors="pt"
+        ).input_ids
+        
         encoding = {
-            "pixel_values": None,       # Return processed image as a tensor
-            "labels": None,             # Return tokenized caption as a padded tensor
+            "pixel_values": pixel_values.squeeze(0),       # Return processed image as a tensor
+            "labels": labels.squeeze(0),             # Return tokenized caption as a padded tensor
             "path": self.img_paths[idx],
             "captions": self.captions[idx],
         }
-        # ####################
 
         return encoding
 
     
 def train_cap_model(args):
     # Define your vision processor and language tokenizer
-    tokenizer = None
-    processor = None
+    tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    processor = AutoProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
 
     # Define your Image Captioning model using Vision-Encoder-Decoder model
     # Reference: https://huggingface.co/docs/transformers/en/model_doc/vision-encoder-decoder
-    model = None    # NOTE: Send your model to GPU
-
+    model = VisionEncoderDecoderModel.from_encoder_decoder_pretrained(
+        "google/vit-base-patch16-224-in21k", "gpt2"
+    )
+    model.to("cuda" if torch.cuda.is_available() else "cpu")
     # Modify the embedding lookup table in decoder model and the tokenizer
     # to include bos_token "<|beginoftext|>" and pad_token "<|pad|>"
     # NOTE: The format of GPT2 inputs:
@@ -93,12 +121,24 @@ def train_cap_model(args):
     # For captoning, we want:
     # <|beginoftext|> + caption + <|endoftext|>
     # followed by a number of paddings "<|pad|>"
+    # Modifying GPT-2 tokenizer to add special tokens
+    special_tokens_dict = {
+    'bos_token': '<|beginoftext|>',
+    'eos_token': '<|endoftext|>',
+    'pad_token': '<|pad|>'
+    }
+
+    # Add the special tokens to the tokenizer's vocabulary
+    tokenizer.add_special_tokens(special_tokens_dict)
+    
+    # Resize the decoder’s embeddings to match the updated tokenizer size
+    model.decoder.resize_token_embeddings(len(tokenizer))
 
 
 
     # Load train/val dataset
-    train_dataset = FlickrDataset(args, "train", tokenizer=tokenizer, processor=processor)
-    val_dataset = FlickrDataset(args, "val", tokenizer=tokenizer, processor=processor)
+    train_dataset = FlickrDataset(args, mode="train", tokenizer=tokenizer, processor=processor)
+    val_dataset = FlickrDataset(args, mode="val", tokenizer=tokenizer, processor=processor)
 
     # Model configuration. 
     # Reference: https://huggingface.co/docs/transformers/en/model_doc/vision-encoder-decoder
@@ -107,6 +147,7 @@ def train_cap_model(args):
     model.config.bos_token_id = tokenizer.bos_token_id
     model.generation_config.bos_token_id = tokenizer.bos_token_id
     model.generation_config.pad_token_id = tokenizer.pad_token_id
+    
 
     # TODO: Play around with some generation config parameters
     # e.g. For beam search, you can potentially have a larger beam size of 5
@@ -114,9 +155,23 @@ def train_cap_model(args):
     model.generation_config.max_length = args.max_length #None
     model.generation_config.num_beams = args.num_beams #None
 
-    # TODO: Define training arguments for Seq2Seq model (Seq2SeqTrainingArguments)
+    # Define training arguments for Seq2Seq model (Seq2SeqTrainingArguments)
     # Reference: https://huggingface.co/docs/transformers/en/main_classes/trainer
-    training_args = None
+    training_args = Seq2SeqTrainingArguments(
+        output_dir="./results",
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
+        predict_with_generate=True,
+        eval_strategy="steps",
+        num_train_epochs=args.epochs,
+        logging_steps=args.logging_steps,
+        save_steps=500,
+        eval_steps=500,
+        learning_rate=args.lr,
+        load_best_model_at_end=True,
+        save_total_limit=1,
+        report_to="none"  # Disables WandB reporting
+    )
 
     # Instantiate seq2seq model trainer
     compute_metrics = partial(compute_bleu_score, tokenizer=tokenizer)
@@ -141,17 +196,20 @@ def load_trained_model(
     ):
     """TODO: Load your best trained model, processor and tokenizer.
     """
-    # TODO: Load your model configuration
-    config = None
+    # Load your model configuration
+    # Load the model configuration
+    config = VisionEncoderDecoderModel.from_pretrained(ckpt_dir).config
 
-    # TODO: Load encoder processor
-    processor = None
+    # Load encoder processor
+    processor = AutoProcessor.from_pretrained(ckpt_dir)
 
-    # TODO: Load decoder tokenizer
-    tokenizer = None
+    # Load decoder tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(ckpt_dir)
     
-    # TODO: Load your best trained model
-    model = None
+    # Load your best trained model
+    model = VisionEncoderDecoderModel.from_pretrained(ckpt_dir, config=config)
+
+    
     if torch.cuda.is_available():
         model = model.cuda()
 
@@ -168,16 +226,19 @@ def inference(
     # TODO: Load and process the image
     image = Image.open(img_path).convert("RGB")
     img_tensor = None   # TODO: Preproces the image
+    img_tensor = processor(images=image, return_tensors="pt").pixel_values()#.to("cuda" if torch.cuda.is_available() else "cpu")
 
     # Ensure your img_tensor is on GPU
     if torch.cuda.is_available():
         img_tensor = img_tensor.cuda()
 
-    # TODO: Generate the caption with VisionEncoderDecoderModel's generate API
-    generated_ids = None
+    # Generate the caption with VisionEncoderDecoderModel's generate API
+    generated_ids = model.generate(img_tensor, max_length=45, num_beams=5)
+
+
 
     # Tokens -> Str
-    generated_caption = None
+    generated_caption = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
 
     return generated_caption
 

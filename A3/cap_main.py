@@ -8,7 +8,15 @@ def inspect_data(
     args,
     n_imgs: int = 2,
     ):
-    dataset = FlickrDataset(args)
+
+    # TODO:
+    # Define your vision processor and language tokenizer
+    # You do not need to submit this part, or the ``cap_main.py'' file. 
+    # This is simply here for debugging purpose.
+    tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    processor = AutoProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
+
+    dataset = FlickrDataset(args, tokenizer=tokenizer, processor=processor)
     indices = np.random.randint(0, len(dataset), size=(n_imgs, ))
     # Visualize with matplotlib
     for i, idx in enumerate(indices):
