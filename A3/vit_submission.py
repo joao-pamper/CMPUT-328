@@ -13,7 +13,7 @@ from torch.optim.lr_scheduler import StepLR
 
 
 class Args:
-    """TODO: Command-line arguments to store model configuration."""
+    """Command-line arguments to store model configuration."""
 
     num_classes = 10
 
@@ -24,7 +24,6 @@ class Args:
     weight_decay = 0.00001
 
     # Hyperparameters for ViT
-    # Adjust as you see fit
     input_resolution = 32
     in_channels = 3
     patch_size = 4
@@ -32,7 +31,6 @@ class Args:
     layers = 6
     heads = 8
 
-    # Save your model as "vit-cifar10-{YOUR_CCID}"
     YOUR_CCID = "amaralpe"
     name = f"vit-cifar10-{YOUR_CCID}"
 
@@ -90,11 +88,10 @@ class PositionEmbedding(nn.Module):
         self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_size))
         
         # Create learnable position embeddings (shape: 1, num_patches + 1, hidden_size)
-        # The +1 is for the [CLS] token position
         self.position_embeddings = nn.Parameter(torch.zeros(1, num_patches + 1, hidden_size))
         
         # Initialize parameters
-        nn.init.trunc_normal_(self.cls_token, std=0.02)  # Truncated normal initialization
+        nn.init.trunc_normal_(self.cls_token, std=0.02)
         nn.init.trunc_normal_(self.position_embeddings, std=0.02)
 
     def forward(self, embeddings: torch.Tensor) -> torch.Tensor:
@@ -196,27 +193,27 @@ class ViT(nn.Module):
         self.classifier = nn.Linear(hidden_size, num_classes)
 
     def forward(self, x: torch.Tensor):
-        # Step 1: Compute patch embeddings
-        x = self.patch_embed(x)  # Shape: (batch_size, num_patches, hidden_size)
+        # Compute patch embeddings
+        x = self.patch_embed(x)  
         
-        # Step 2: Add position embeddings (with the CLS token)
-        x = self.pos_embed(x)  # Shape: (batch_size, num_patches + 1, hidden_size)
+        # Add position embeddings (with the CLS token)
+        x = self.pos_embed(x)  
         
-        # Step 3: Layer normalization before transformer
-        x = self.ln_pre(x)  # Shape: (batch_size, num_patches + 1, hidden_size)
+        # Layer normalization before transformer
+        x = self.ln_pre(x) 
         
-        # Step 4: Pass through transformer encoder blocks
+        # Pass through transformer encoder blocks
         for layer in self.transformer:
-            x = layer(x)  # Shape remains the same
+            x = layer(x) 
         
-        # Step 5: Layer normalization after transformer
+        # Layer normalization after transformer
         x = self.ln_post(x)
 
-        # Step 6: Extract the CLS token (it's the first token in the sequence)
-        cls_token = x[:, 0]  # Shape: (batch_size, hidden_size)
+        # Extract the CLS token (it's the first token in the sequence)
+        cls_token = x[:, 0] 
         
-        # Step 7: Classifier head
-        logits = self.classifier(cls_token)  # Shape: (batch_size, num_classes)
+        # Classifier head
+        logits = self.classifier(cls_token) 
 
         return logits
 
@@ -224,8 +221,8 @@ class ViT(nn.Module):
 def transform(
     input_resolution: int,
     mode: str = "train",
-    mean: Tuple[float] = (0.5, 0.5, 0.5),  # NOTE: Modify this as you see fit
-    std: Tuple[float] = (0.5, 0.5, 0.5),  # NOTE: Modify this as you see fit
+    mean: Tuple[float] = (0.5, 0.5, 0.5),  
+    std: Tuple[float] = (0.5, 0.5, 0.5), 
 ):
     """TODO: (0.25 out of 10) Preprocess the image inputs
     with at least 3 data augmentation for training.
@@ -255,8 +252,8 @@ def transform(
 
 def inverse_transform(
     img_tensor: torch.Tensor,
-    mean: Tuple[float] = (-0.5 / 0.5, -0.5 / 0.5, -0.5 / 0.5,),  # NOTE: Modify this as you see fit
-    std: Tuple[float] = (1 / 0.5, 1 / 0.5, 1 / 0.5),  # NOTE: Modify this as you see fit
+    mean: Tuple[float] = (-0.5 / 0.5, -0.5 / 0.5, -0.5 / 0.5,),  
+    std: Tuple[float] = (1 / 0.5, 1 / 0.5, 1 / 0.5),  
 ) -> np.ndarray:
     """Given a preprocessed image tensor, revert the normalization process and
     convert the tensor back to a numpy image.
@@ -271,7 +268,7 @@ def inverse_transform(
     img_tensor = inv_normalize(img_tensor)
     
     # Rearrange the tensor to (H, W, C) format for visualization
-    img_tensor = img_tensor.permute(1, 2, 0).clamp(0, 1)  # Clamp values between [0, 1]
+    img_tensor = img_tensor.permute(1, 2, 0).clamp(0, 1)  
     
     # Convert to numpy array and scale to [0, 255]
     img = np.uint8(255 * img_tensor.numpy())
@@ -349,8 +346,7 @@ def train_vit_model(args):
             loss.backward()
             optimizer.step()
 
-            # NOTE: Show train loss at the end of epoch
-            # Feel free to modify this to log more steps
+            # Show train loss at the end of epoch
             pbar.set_postfix({"loss": "{:.4f}".format(loss.item())})
 
         # Step the scheduler

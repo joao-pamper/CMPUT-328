@@ -4,8 +4,8 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from nltk.translate.bleu_score import corpus_bleu
-from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
-from transformers import default_data_collator, AutoProcessor, AutoTokenizer, VisionEncoderDecoderModel
+from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, GPT2TokenizerFast, ViTImageProcessor, VisionEncoderDecoderModel
+from transformers import default_data_collator, AutoProcessor, AutoTokenizer
 
 
 class Args:
@@ -28,13 +28,11 @@ class Args:
     epochs = 5
 
     # Generation cfgs
-    # TODO: Add more as you see fit
     num_beams = 5
-    max_length = 45     # TODO: Can play around
+    max_length = 45
 
 
     # Train ops
-    # TODO: Add more as you see fit
     logging_steps = 50
 
 class FlickrDataset(Dataset):
@@ -50,19 +48,20 @@ class FlickrDataset(Dataset):
         
         # Load the data into lines
         with open(f"{args.root_dir}/{mode}.txt", "r") as f:
-            lines = f.readlines()
+            lines = f.readlines()[1:]
 
         # Parse image paths and captions
         self.img_paths = []
         self.captions = []
         for line in lines:
-            img_path, caption = line.strip().split(";")  # Assuming tab-separated file
+            img_path, caption = line.strip().split(";") 
             self.img_paths.append(f"{args.root_dir}/images/{img_path}")
             self.captions.append(caption)
         
         # Initialize vision encoder's processor
-        # Initialize langauge decoder's tokenizer
         self.processor = processor
+
+        # Initialize langauge decoder's tokenizer
         self.tokenizer = tokenizer
 
     def __len__(self):
@@ -70,20 +69,12 @@ class FlickrDataset(Dataset):
 
     def __getitem__(self, idx):
         # Load and process image-caption data
-        # Load image and process it
         image = Image.open(self.img_paths[idx]).convert("RGB")
-        pixel_values = self.processor(images=image, return_tensors="pt").pixel_values
+        pixel_values = self.processor(images=image, return_tensors="pt").pixel_values.squeeze(0)
 
         # Tokenize the caption
         # Add the padding token to the GPT-2 tokenizer
         self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
-        # labels = self.tokenizer(
-        #     self.captions[idx],
-        #     return_tensors="pt",
-        #     padding="max_length",
-        #     truncation=True,
-        #     max_length=self.args.max_length
-        # ).input_ids
 
         labels = self.tokenizer(
             f"<|beginoftext|> {self.captions} <|endoftext|>",
@@ -91,11 +82,11 @@ class FlickrDataset(Dataset):
             truncation=True,
             max_length=self.args.max_length,
             return_tensors="pt"
-        ).input_ids
+        )
         
         encoding = {
-            "pixel_values": pixel_values.squeeze(0),       # Return processed image as a tensor
-            "labels": labels.squeeze(0),             # Return tokenized caption as a padded tensor
+            "pixel_values": pixel_values,
+            "labels": labels["input_ids"].squeeze(0),
             "path": self.img_paths[idx],
             "captions": self.captions[idx],
         }
@@ -105,14 +96,14 @@ class FlickrDataset(Dataset):
     
 def train_cap_model(args):
     # Define your vision processor and language tokenizer
-    tokenizer = AutoTokenizer.from_pretrained("gpt2")
-    processor = AutoProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
+
+    tokenizer = GPT2TokenizerFast.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+    processor = ViTImageProcessor.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
 
     # Define your Image Captioning model using Vision-Encoder-Decoder model
     # Reference: https://huggingface.co/docs/transformers/en/model_doc/vision-encoder-decoder
-    model = VisionEncoderDecoderModel.from_encoder_decoder_pretrained(
-        "google/vit-base-patch16-224-in21k", "gpt2"
-    )
+    model = VisionEncoderDecoderModel.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+
     model.to("cuda" if torch.cuda.is_available() else "cpu")
     # Modify the embedding lookup table in decoder model and the tokenizer
     # to include bos_token "<|beginoftext|>" and pad_token "<|pad|>"
@@ -159,19 +150,7 @@ def train_cap_model(args):
     # Reference: https://huggingface.co/docs/transformers/en/main_classes/trainer
     training_args = Seq2SeqTrainingArguments(
         output_dir="./results",
-        per_device_train_batch_size=args.batch_size,
-        per_device_eval_batch_size=args.batch_size,
-        predict_with_generate=True,
-        eval_strategy="steps",
-        num_train_epochs=args.epochs,
-        logging_steps=args.logging_steps,
-        save_steps=500,
-        eval_steps=500,
-        learning_rate=args.lr,
-        load_best_model_at_end=True,
-        save_total_limit=1,
-        report_to="none"  # Disables WandB reporting
-    )
+        report_to="none")
 
     # Instantiate seq2seq model trainer
     compute_metrics = partial(compute_bleu_score, tokenizer=tokenizer)
@@ -196,7 +175,6 @@ def load_trained_model(
     ):
     """TODO: Load your best trained model, processor and tokenizer.
     """
-    # Load your model configuration
     # Load the model configuration
     config = VisionEncoderDecoderModel.from_pretrained(ckpt_dir).config
 
@@ -223,10 +201,10 @@ def inference(
     ):
     """TODO: Example inference function to predict a caption for an image.
     """
-    # TODO: Load and process the image
+    # Load and process the image
     image = Image.open(img_path).convert("RGB")
-    img_tensor = None   # TODO: Preproces the image
-    img_tensor = processor(images=image, return_tensors="pt").pixel_values()#.to("cuda" if torch.cuda.is_available() else "cpu")
+    # Preproces the image
+    img_tensor = processor(images=image, return_tensors="pt").pixel_values
 
     # Ensure your img_tensor is on GPU
     if torch.cuda.is_available():
@@ -234,8 +212,6 @@ def inference(
 
     # Generate the caption with VisionEncoderDecoderModel's generate API
     generated_ids = model.generate(img_tensor, max_length=45, num_beams=5)
-
-
 
     # Tokens -> Str
     generated_caption = tokenizer.decode(generated_ids[0], skip_special_tokens=True)

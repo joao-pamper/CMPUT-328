@@ -44,11 +44,11 @@ def main():
     # -----
     # NOTE: Always inspect your data
     inspect_data(args)
-
+    print(' after inspect; before train cap')
     # -----
     # Train your image captioning model
     train_cap_model(args)
-
+    print("after train_cap an before load")
     # -----
     # A few quick test
     model, processor, tokenizer = load_trained_model("./" + args.name)
