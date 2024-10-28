@@ -1,11 +1,12 @@
 from functools import partial
+import os
 
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from nltk.translate.bleu_score import corpus_bleu
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, GPT2TokenizerFast, ViTImageProcessor, VisionEncoderDecoderModel
-from transformers import default_data_collator, AutoProcessor, AutoTokenizer
+from transformers import default_data_collator
 
 
 class Args:
@@ -18,7 +19,7 @@ class Args:
     # Dataset path
     root_dir = "./flickr8k"
 
-    # Save your model as "cap-vlm-{YOUR_CCID}"
+    # Save your model as "cap-vlm-amaralpe"
     YOUR_CCID = "amaralpe"
     name = f"cap-vlm-{YOUR_CCID}"
 
@@ -30,7 +31,6 @@ class Args:
     # Generation cfgs
     num_beams = 5
     max_length = 45
-
 
     # Train ops
     logging_steps = 50
@@ -47,7 +47,7 @@ class FlickrDataset(Dataset):
         self.args = args
         
         # Load the data into lines
-        with open(f"{args.root_dir}/{mode}.txt", "r") as f:
+        with open(f"{self.args.root_dir}/{mode}.txt", "r") as f:
             lines = f.readlines()[1:]
 
         # Parse image paths and captions
@@ -57,7 +57,7 @@ class FlickrDataset(Dataset):
             img_path, caption = line.strip().split(";") 
             self.img_paths.append(f"{args.root_dir}/images/{img_path}")
             self.captions.append(caption)
-        
+
         # Initialize vision encoder's processor
         self.processor = processor
 
@@ -73,11 +73,8 @@ class FlickrDataset(Dataset):
         pixel_values = self.processor(images=image, return_tensors="pt").pixel_values.squeeze(0)
 
         # Tokenize the caption
-        # Add the padding token to the GPT-2 tokenizer
-        self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
-
         labels = self.tokenizer(
-            f"<|beginoftext|> {self.captions} <|endoftext|>",
+            self.captions[idx],
             padding="max_length",
             truncation=True,
             max_length=self.args.max_length,
@@ -150,7 +147,10 @@ def train_cap_model(args):
     # Reference: https://huggingface.co/docs/transformers/en/main_classes/trainer
     training_args = Seq2SeqTrainingArguments(
         output_dir="./results",
-        report_to="none")
+        report_to="none",
+        num_train_epochs=args.epochs,
+        predict_with_generate=True
+        )
 
     # Instantiate seq2seq model trainer
     compute_metrics = partial(compute_bleu_score, tokenizer=tokenizer)
@@ -161,14 +161,47 @@ def train_cap_model(args):
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         compute_metrics=compute_metrics,
-        data_collator=default_data_collator,
+        data_collator=default_data_collator
     )
 
     # Start training
     # TODO: A good performing model should easily reach a BLEU score above 0.07
     trainer.train()
     trainer.save_model(args.name)
-    
+
+    # torch.cuda.empty_cache()
+    # trainer.evaluate()
+
+def evaluate(args, tokenizer, model, processor):
+    """
+    Evaluates model and prints bleu score at the end.
+    """
+    train_dataset = FlickrDataset(args, mode="train", tokenizer=tokenizer, processor=processor)
+    val_dataset = FlickrDataset(args, mode="val", tokenizer=tokenizer, processor=processor)
+
+    training_args = Seq2SeqTrainingArguments(
+        output_dir="./results",
+        report_to="none",
+        num_train_epochs=args.epochs,
+        #evaluation_strategy="steps"
+        #eval_on_start=True,
+        predict_with_generate=True
+        )
+
+    # Instantiate seq2seq model trainer
+    compute_metrics = partial(compute_bleu_score, tokenizer=tokenizer)
+    trainer = Seq2SeqTrainer(
+        tokenizer=tokenizer,
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=val_dataset,
+        compute_metrics=compute_metrics,
+        data_collator=default_data_collator
+    )
+    torch.cuda.empty_cache()
+    trainer.evaluate()
+
 
 def load_trained_model(
     ckpt_dir: str,
@@ -179,15 +212,14 @@ def load_trained_model(
     config = VisionEncoderDecoderModel.from_pretrained(ckpt_dir).config
 
     # Load encoder processor
-    processor = AutoProcessor.from_pretrained(ckpt_dir)
+    processor = ViTImageProcessor.from_pretrained('google/vit-base-patch16-224')
 
     # Load decoder tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(ckpt_dir)
+    tokenizer = GPT2TokenizerFast.from_pretrained(ckpt_dir)
     
     # Load your best trained model
     model = VisionEncoderDecoderModel.from_pretrained(ckpt_dir, config=config)
 
-    
     if torch.cuda.is_available():
         model = model.cuda()
 
@@ -211,16 +243,16 @@ def inference(
         img_tensor = img_tensor.cuda()
 
     # Generate the caption with VisionEncoderDecoderModel's generate API
-    generated_ids = model.generate(img_tensor, max_length=45, num_beams=5)
+    generated_ids = model.generate(img_tensor) #, max_length=45, num_beams=5)
 
     # Tokens -> Str
-    generated_caption = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
+    generated_caption = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
 
     return generated_caption
 
 def compute_bleu_score(pred, tokenizer):
     """NOTE: DO NOT CHANGE.
-    Compute BLEU score.
+    Compute BLEU score. has to be > 0.07%
     NOTE: if you are interested in learning about the BLEU score, here are some interesting resources:
     https://www.geeksforgeeks.org/nlp-bleu-score-for-evaluating-neural-machine-translation-python/
     https://cloud.google.com/translate/automl/docs/evaluate#interpretation
