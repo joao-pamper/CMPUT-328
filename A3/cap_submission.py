@@ -169,8 +169,6 @@ def train_cap_model(args):
     trainer.train()
     trainer.save_model(args.name)
 
-    # torch.cuda.empty_cache()
-    # trainer.evaluate()
 
 def evaluate(args, tokenizer, model, processor):
     """

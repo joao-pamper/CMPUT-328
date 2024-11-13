@@ -1,1 +1,4 @@
 .DS_Store
+A4/train.npz
+A4/valid.npz
+A3/cap-vlm-amaralpe/model.safetensors

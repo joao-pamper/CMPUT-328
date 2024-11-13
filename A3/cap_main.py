@@ -47,7 +47,7 @@ def main():
 
     # -----
     # Train your image captioning model
-    train_cap_model(args)
+    #train_cap_model(args)
 
     # -----
     # A few quick test
