@@ -19,7 +19,7 @@ class MNISTDDRGB(torch.utils.data.Dataset):
         self.imgs = imgs
 
     def __getitem__(self, idx):
-        img = self.img[idx, ...].reshape((64, 64, 3)).astyoe(np.uint8)
+        img = self.imgs[idx, ...].reshape((64, 64, 3)).astype(np.uint8)
         img = img.transpose((2, 0, 1))
 
         img = tv_tensors.Image(img)
@@ -59,14 +59,14 @@ def detect_and_segment(images):
         box_score_thresh = 0,
         box_nms_thresh=0.8,
 
-        v2=1,
+        v2=0,
 
         # min_size=64
         # max_size=64
         )
     batch_size=10
 
-    ckpt_path = os.path.join('ckpt_v2', 'step_x.pth')
+    ckpt_path = os.path.join('ckpt', 'step_18300.pth')
 
     ckpt = torch.load(ckpt_path, map_location=device)
 
@@ -87,7 +87,7 @@ def detect_and_segment(images):
 
     test_dataset = MNISTDDRGB(images, transforms)
 
-    test_data_loader = torch.utils.data.DataLoades(
+    test_data_loader = torch.utils.data.DataLoader(
         test_dataset,
         batch_size=batch_size,
         shuffle=False,

@@ -39,8 +39,9 @@ class Params:
     val_samples = 100
 
     batch_size = 8
-    ckpt_path = 'ckpt'
     v2 = 0
+    if v2 == 1: ckpt_path = 'ckpt_v2'
+    else: ckpt_path = 'ckpt'
     no_resize = 1
 
 class MNISTDDRGB(torch.utils.data.Dataset):
